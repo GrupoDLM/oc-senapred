@@ -1,0 +1,17 @@
+{
+  "name": "Control de OC SENAPRED — DLM & VENTIA",
+  "short_name": "OC SENAPRED",
+  "description": "Control de Órdenes de Compra de SENAPRED para DLM y VENTIA: estados, costos, márgenes, pedidos y análisis de competencia.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b1622",
+  "theme_color": "#0b1622",
+  "lang": "es-CL",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -397,6 +397,20 @@ initGrid(document.querySelector("#view-control table.grid"),"grid_control_v2");
   function loadFacturas(){
     try{const el=document.getElementById("fact-seed");if(el&&el.textContent.trim())applyFact(JSON.parse(el.textContent));}catch(e){}
     fetch("data/facturas.json",{cache:"no-store"}).then(r=>r.ok?r.json():null).then(j=>{if(j)applyFact(j);}).catch(()=>{});}
+  /* ---- Datos del robot (GitHub Actions): OC + detalle ya pre-cargados, sin consultar la API ---- */
+  function loadServerData(){
+    fetch("data/ocs.json",{cache:"no-store"}).then(r=>r.ok?r.json():null).then(j=>{
+      if(!j||!j.ocs||!j.ocs.length)return;
+      const sdet=j.det||{};Object.keys(sdet).forEach(k=>{DET[k]=sdet[k];});      // el robot manda en el detalle
+      const map={};(j.ocs||[]).forEach(o=>{if(!map[o.codigo])map[o.codigo]=o;});
+      OCS.forEach(o=>{if(!map[o.codigo])map[o.codigo]=o;});                        // conserva OC locales que el robot aún no tenga
+      OCS=Object.values(map);
+      try{localStorage.setItem(CACHEKEY,JSON.stringify({det:DET,ocs:OCS,dayLists:DAYL,savedAt:j.savedAt||new Date().toISOString()}));}catch(e){}
+      if(j.savedAt){try{localStorage.setItem(LUPKEY,j.savedAt);}catch(e){}showLastUpd(j.savedAt);}
+      $("xlsx").disabled=false;
+      $("progress").innerHTML="✔ "+OCS.length+" OC de SENAPRED cargadas automáticamente (robot)"+(j.savedAt?" · "+fmtDate(j.savedAt)+" "+String(j.savedAt).slice(11,16):"")+".";
+      renderKPIs();renderTable();buildFilters();
+    }).catch(()=>{});}
   function catPrecio(it,reg){if(!it||!it.precios)return null;const p=it.precios[reg];if(p)return p;const vals=Object.values(it.precios);return vals.length?vals.reduce((a,b)=>b.p<a.p?b:a):null;}
   window.cCatAdd=(id)=>{const p=PEDIDOS[id];if(!p||!CAT)return;const qi=document.getElementById("catq_"+id),rs=document.getElementById("catreg_"+id);
     const nombre=(qi&&qi.value||"").trim();if(!nombre)return;const it=CATBY[nombre];if(!it){alert("Elige un producto de la lista del catálogo.");return;}
@@ -693,7 +707,7 @@ initGrid(document.querySelector("#view-control table.grid"),"grid_control_v2");
   ["from","to"].forEach(id=>$(id).addEventListener("change",()=>{$("quick").value="custom";}));
   $("q").addEventListener("input",()=>{renderKPIs();renderTable();});
   document.querySelectorAll("#view-control table.grid th[data-k]").forEach(th=>th.addEventListener("click",()=>{const k=th.getAttribute("data-k");if(sortK===k)sortDir*=-1;else{sortK=k;sortDir=1;}renderTable();}));
-  (function init(){setQuickDates();loadCatalogo();loadFacturas();const cache=loadCache();if(cache.det)DET=cache.det;if(cache.dayLists)DAYL=cache.dayLists;let lup="";try{lup=localStorage.getItem(LUPKEY)||"";}catch(e){}if(!lup&&cache.savedAt)lup=cache.savedAt;showLastUpd(lup);const hayPed=Object.keys(PEDIDOS).filter(id=>!PEDIDOS[id].linked).length;if(cache.ocs&&cache.ocs.length){OCS=cache.ocs;if(cache.from)$("from").value=cache.from;if(cache.to)$("to").value=cache.to;$("xlsx").disabled=false;$("progress").innerHTML="Mostrando "+OCS.length+" OC guardadas. Presiona «Actualizar» para traer nuevas y cambios.";}else{$("progress").innerHTML=(hayPed?hayPed+" pedido(s) manual(es) guardado(s). ":"")+"Elige un rango y presiona «Actualizar». Lo descargado queda guardado; tus costos y estados quedan aparte y no se borran.";}renderKPIs();renderTable();buildFilters();})();
+  (function init(){setQuickDates();loadCatalogo();loadFacturas();loadServerData();const cache=loadCache();if(cache.det)DET=cache.det;if(cache.dayLists)DAYL=cache.dayLists;let lup="";try{lup=localStorage.getItem(LUPKEY)||"";}catch(e){}if(!lup&&cache.savedAt)lup=cache.savedAt;showLastUpd(lup);const hayPed=Object.keys(PEDIDOS).filter(id=>!PEDIDOS[id].linked).length;if(cache.ocs&&cache.ocs.length){OCS=cache.ocs;if(cache.from)$("from").value=cache.from;if(cache.to)$("to").value=cache.to;$("xlsx").disabled=false;$("progress").innerHTML="Mostrando "+OCS.length+" OC guardadas. Presiona «Actualizar» para traer nuevas y cambios.";}else{$("progress").innerHTML=(hayPed?hayPed+" pedido(s) manual(es) guardado(s). ":"")+"Elige un rango y presiona «Actualizar». Lo descargado queda guardado; tus costos y estados quedan aparte y no se borran.";}renderKPIs();renderTable();buildFilters();})();
 })();
 
 /* ===================== MÓDULO 2: ANÁLISIS DE COMPETENCIA ===================== */

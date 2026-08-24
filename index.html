@@ -193,9 +193,34 @@ if("serviceWorker" in navigator && location.protocol.indexOf("http")===0){
     <div class="fld"><label>Comuna (entrega)</label><div class="ms" id="c_ms_fcom"></div></div>
     <div class="fld"><label>&nbsp;</label><button class="sec" id="c_limpiar">Limpiar filtros</button></div>
   </div>
+  <div id="c_bulkbar" style="display:none;align-items:center;gap:12px;flex-wrap:wrap;margin:6px 0 8px;padding:8px 12px;border:1px solid #3b82f655;background:#3b82f618;border-radius:8px">
+    <span><b id="c_bulkcount">0</b> OC seleccionada(s)</span>
+    <span style="color:#8aa0b4">Asignar Estado interno:</span>
+    <select id="c_bulksel" style="min-width:150px"></select>
+    <button id="c_bulkapply">Aplicar a las seleccionadas</button>
+    <button class="sec" id="c_bulkclear">Limpiar selección</button>
+  </div>
+  <div id="c_prodpanel" style="margin:6px 0 10px;border:1px solid #2a3a4d;border-radius:8px;overflow:hidden">
+    <button id="c_prodtoggle" style="width:100%;text-align:left;background:#16202c;border:0;color:#e8eef4;padding:10px 12px;cursor:pointer;font-size:14px">📦 Buscar por producto (unidades pendientes de entrega / facturación y en qué lugar) ▸</button>
+    <div id="c_prodbody" style="display:none;padding:12px;background:#0f1720">
+      <div class="controls" style="margin:0 0 10px">
+        <div class="fld"><label>Producto (escribe parte del nombre)</label><input id="c_prodq" list="c_prodlist" placeholder="ej: agua 1,6" style="min-width:260px"><datalist id="c_prodlist"></datalist></div>
+        <div class="fld"><label>Estado</label><select id="c_prodest" style="min-width:190px">
+          <option value="ALL">Todos los estados</option>
+          <option value="PENDENT">Pendientes de entrega</option>
+          <option value="PENDFACT">Pendientes de facturación</option>
+        </select></div>
+        <div class="fld"><label>Empresa</label><select id="c_prodemp" style="min-width:120px"><option value="ALL">Ambas</option><option value="DLM">DLM</option><option value="VENTIA">VENTIA</option></select></div>
+        <div class="fld"><label>&nbsp;</label><button class="sec" id="c_prodclear">Limpiar</button></div>
+      </div>
+      <div id="c_prodsum" class="kpis" style="margin-bottom:10px"></div>
+      <div id="c_prodout"></div>
+    </div>
+  </div>
   <table class="grid">
-    <colgroup><col style="width:2%"><col style="width:5.5%"><col style="width:7.5%"><col style="width:4.5%"><col style="width:5%"><col style="width:9.5%"><col style="width:6.5%"><col style="width:6.5%"><col style="width:8%"><col style="width:7.5%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:4.5%"><col style="width:5.5%"><col style="width:7%"></colgroup>
+    <colgroup><col style="width:2.5%"><col style="width:2%"><col style="width:5.5%"><col style="width:7.5%"><col style="width:4.5%"><col style="width:5%"><col style="width:9.5%"><col style="width:6.5%"><col style="width:6.5%"><col style="width:8%"><col style="width:7.5%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:4.5%"><col style="width:5.5%"><col style="width:7%"></colgroup>
     <thead><tr>
+      <th style="text-align:center"><input type="checkbox" id="c_selall" title="Seleccionar todas las visibles"></th>
       <th></th>
       <th data-k="fecha">Fecha</th><th data-k="codigo">N° OC</th><th data-k="femer">FEMER</th><th data-k="empresa">Empresa</th>
       <th data-k="nombre">Nombre</th><th data-k="region">Región</th><th data-k="comuna">Lugar entrega</th><th data-k="estadoTxt">Estado MP</th>
@@ -340,7 +365,7 @@ initGrid(document.querySelector("#view-control table.grid"),"grid_control_v2");
   const INTERNOS=["Pendiente","Comprada","En preparación","Despachada","En tránsito","Entregada","Facturada","Cerrada","Con problema"];
   const INTCOLOR={"Pendiente":"#64748b","Comprada":"#0891b2","En preparación":"#d97706","Despachada":"#6366f1","En tránsito":"#8b5cf6","Entregada":"#16a34a","Facturada":"#0ea5e9","Cerrada":"#334155","Con problema":"#dc2626"};
   const ESTCOMPRA=["Por comprar","Cotizando","Comprado","Recibido","Facturado"];
-  let OCS=[],DET={},DAYL={},CTRL=loadCtrl(),ICOST=loadIC(),PEDIDOS=loadPed(),running=false,stopFlag=false,sortK="fecha",sortDir=-1,expanded={};
+  let OCS=[],DET={},DAYL={},CTRL=loadCtrl(),ICOST=loadIC(),PEDIDOS=loadPed(),running=false,stopFlag=false,sortK="fecha",sortDir=-1,expanded={},selected={};
   /* ---- Filtros multi-selección (marcar varias opciones por menú) ---- */
   const FILT={femp:new Set(),fcod:new Set(),fint:new Set(),fmp:new Set(),ffemer:new Set(),ffact:new Set(),freg:new Set(),fcom:new Set()};
   const MSOPTS={},MSLABEL={femp:"Todas",fcod:"Todas",fint:"Todos",fmp:"Todos",ffemer:"Todos",ffact:"Todas",freg:"Todas",fcom:"Todas"};
@@ -426,8 +451,11 @@ initGrid(document.querySelector("#view-control table.grid"),"grid_control_v2");
   function moneyInput(disp,handler){return '<span class="inpmoney"><span class="s">$</span><input value="'+esc(disp)+'" placeholder="0" style="width:92px" onchange="'+handler+'"></span>';}
   function getItems(key){const p=PEDIDOS[key];if(p)return p.items||[];const d=DET[key];return(d&&d.items)||[];}
   function showLastUpd(isoS){const el=$("lastupd");if(!el)return;if(!isoS){el.innerHTML='<span>🕒 Última actualización desde Mercado Público:</span> <b>nunca</b> <span style="color:#8aa0b4">— presiona «Actualizar».</span>';return;}
-    const fecha=fmtDate(isoS),hora=(isoS.slice(11,16)||"");const dias=daysAgo(isoS.slice(0,10));const stale=dias>=1?' <span class="stale">('+(dias===1?"hace 1 día":"hace "+dias+" días")+")</span>":' <span style="color:#16a34a">(hoy)</span>';
-    el.innerHTML='<span>🕒 Última actualización desde Mercado Público:</span> <b>'+fecha+' '+hora+'</b>'+stale;}
+    let fecha,hora,localISO;
+    if(String(isoS).indexOf("T")>=0){const d=new Date(isoS);if(!isNaN(d)){const p=n=>String(n).padStart(2,"0");fecha=p(d.getDate())+"-"+p(d.getMonth()+1)+"-"+d.getFullYear();hora=p(d.getHours())+":"+p(d.getMinutes());localISO=d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate());}}
+    if(fecha==null){fecha=fmtDate(isoS);hora=(isoS.slice(11,16)||"");localISO=isoS.slice(0,10);}
+    const dias=daysAgo(localISO);const stale=dias>=1?' <span class="stale">('+(dias===1?"hace 1 día":"hace "+dias+" días")+")</span>":' <span style="color:#16a34a">(hoy)</span>';
+    el.innerHTML='<span>🕒 Última actualización desde Mercado Público:</span> <b>'+fecha+(hora?' '+hora:'')+'</b>'+stale;}
   function loadCache(){try{return JSON.parse(localStorage.getItem(CACHEKEY)||"{}");}catch(e){return{};}}
   function saveCache(){try{localStorage.setItem(CACHEKEY,JSON.stringify({det:DET,ocs:OCS,dayLists:DAYL,savedAt:new Date().toISOString(),from:$("from").value,to:$("to").value}));}catch(e){}}
   function setBar(f){$("barfill").style.width=Math.min(100,Math.max(0,f*100))+"%";}
@@ -511,7 +539,7 @@ initGrid(document.querySelector("#view-control table.grid"),"grid_control_v2");
       const pend=(!r.manual&&!r.d);
       const ocCell=(r.manual?'<span class="pill" style="background:#a855f722;color:#c084fc" title="Pedido manual sin OC">PEDIDO</span>':'<span class="code">'+esc(r.codigo)+'</span>')+(pend?' <span title="Detalle pendiente de cargar — presiona «Actualizar»" style="color:#d97706">⏳</span>':'');
       const dash=r.manual?"—":(r.d?"—":"…");
-      h+='<tr class="ocrow'+alt+(r.manual?" pedrow":"")+(isOpen?" open":"")+'"><td class="exp" onclick="cToggle(\''+r.codigo+'\')">'+(isOpen?"▾":"▸")+'</td>'+
+      h+='<tr class="ocrow'+alt+(r.manual?" pedrow":"")+(isOpen?" open":"")+'"><td style="text-align:center"><input type="checkbox" class="selchk"'+(selected[r.codigo]?" checked":"")+' onclick="cSelToggle(\''+r.codigo+'\')"></td><td class="exp" onclick="cToggle(\''+r.codigo+'\')">'+(isOpen?"▾":"▸")+'</td>'+
         '<td>'+fmtDate(r.fecha)+'</td><td>'+ocCell+'</td>'+
         '<td class="code">'+esc(r.femer||"")+'</td>'+
         '<td><span class="pill" style="background:'+(r.empresa==="VENTIA"?"#6366f122;color:#818cf8":"#0891b222;color:#22d3ee")+'">'+esc(r.empresa)+'</span></td>'+
@@ -526,11 +554,11 @@ initGrid(document.querySelector("#view-control table.grid"),"grid_control_v2");
         '<td class="num">'+(r.pct!=null?'<span style="color:'+mcolor(r.margen)+'">'+pf(r.pct)+'</span>':"—")+'</td>'+
         '<td><input class="nota" value="'+esc(r.notas)+'" placeholder="nota…" onchange="cNota(\''+r.codigo+'\',this.value)"></td>'+
         '<td>'+factCell(r)+'</td></tr>';
-      if(isOpen)h+='<tr class="detail"><td colspan="16">'+detailHTML(r)+'</td></tr>';
+      if(isOpen)h+='<tr class="detail"><td colspan="17">'+detailHTML(r)+'</td></tr>';
     }
-    $("tb").innerHTML=h||'<tr><td colspan="16" class="muted" style="padding:18px">Sin OC. Presiona «Actualizar».</td></tr>';
+    $("tb").innerHTML=h||'<tr><td colspan="17" class="muted" style="padding:18px">Sin OC. Presiona «Actualizar».</td></tr>';
     $("foot").innerHTML="Mostrando "+rows.length+" de "+OCS.length+" OC. · Abre una OC (▸) para cargar costos por ítem, proveedor, estado interno, guías, facturas y flete. · Clic en los títulos para ordenar. Todo se guarda en este navegador.";
-    markSort();
+    markSort();updateBulk();
   }
   function itemsTable(key,its,editable){
     let g='<table class="items"><thead><tr><th>Producto</th><th class="num">Cant.</th><th class="num">P. venta</th><th class="num">Venta línea</th><th class="num">Costo unit.</th><th class="num">Costo línea</th><th class="num">Margen</th><th class="num">%</th><th>Proveedor compra</th><th>Estado interno</th><th class="num">Entregado</th><th class="num">Pendiente</th><th>Guía(s) despacho</th><th>Factura(s)</th>'+(editable?'<th></th>':'')+'</tr></thead><tbody>';
@@ -617,6 +645,73 @@ initGrid(document.querySelector("#view-control table.grid"),"grid_control_v2");
   function kv(k,v){return'<div><span>'+k+':</span> '+esc(v||"—")+'</div>';}
   window.cToggle=c=>{expanded[c]=!expanded[c];renderTable();};
   window.cEst=(c,v)=>{setCtrl(c,"interno",v);renderKPIs();renderTable();};
+  window.cSelToggle=c=>{if(selected[c])delete selected[c];else selected[c]=true;updateBulk();syncSelall();};
+  window.cSelAll=on=>{const rows=currentView();if(on)rows.forEach(r=>{selected[r.codigo]=true;});else rows.forEach(r=>{delete selected[r.codigo];});renderTable();};
+  function selCodes(){return Object.keys(selected).filter(c=>selected[c]);}
+  function syncSelall(){const rows=currentView();const box=$("selall");if(!box)return;const vis=rows.filter(r=>selected[r.codigo]).length;box.checked=rows.length>0&&vis===rows.length;box.indeterminate=vis>0&&vis<rows.length;}
+  function updateBulk(){const codes=selCodes();const bar=$("bulkbar");if(!bar)return;bar.style.display=codes.length?"flex":"none";const cnt=$("bulkcount");if(cnt)cnt.textContent=codes.length;const sel=$("bulksel");if(sel&&!sel.dataset.filled){sel.innerHTML=INTERNOS.map(v=>'<option>'+v+'</option>').join("");sel.dataset.filled="1";}syncSelall();}
+  window.cBulkApply=()=>{const codes=selCodes();if(!codes.length)return;const v=$("bulksel").value;codes.forEach(c=>setCtrl(c,"interno",v));selected={};renderKPIs();renderTable();buildFilters();};
+  window.cBulkClear=()=>{selected={};renderTable();};
+
+  /* ===== Resumen por producto (independiente de región) ===== */
+  function prodBase(){
+    let rows=OCS.map(row);
+    const peds=Object.keys(PEDIDOS).filter(id=>!PEDIDOS[id].linked).map(id=>pedRow(PEDIDOS[id]));
+    rows=peds.concat(rows);
+    return rows.filter(r=>!r.d||esSen(r.d,r.codigo));
+  }
+  function buildProdList(){
+    const set=new Map();
+    prodBase().forEach(r=>getItems(r.codigo).forEach(it=>{const p=(it.prod||"").trim();if(p&&!set.has(p.toLowerCase()))set.set(p.toLowerCase(),p);}));
+    const dl=$("prodlist");if(dl)dl.innerHTML=[...set.values()].sort((a,b)=>a.localeCompare(b)).map(p=>'<option value="'+esc(p)+'"></option>').join("");
+  }
+  function renderProd(){
+    const out=$("prodout"),sum=$("prodsum");if(!out)return;
+    const toks=$("prodq").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const mode=$("prodest").value,emp=$("prodemp").value;
+    if(!toks.length){sum.innerHTML="";out.innerHTML='<div class="muted" style="padding:10px 2px">Escribe parte del nombre de un producto (ej: «agua 1,6») para ver, en todas las regiones, cuántas unidades hay y cuáles están pendientes de entrega o de facturación, y en qué lugar.</div>';return;}
+    const lines=[];
+    prodBase().forEach(r=>{
+      if(emp!=="ALL"&&r.empresa!==emp)return;
+      getItems(r.codigo).forEach((it,idx)=>{
+        const name=(it.prod||"");const low=name.toLowerCase();
+        if(!toks.every(t=>low.includes(t)))return;
+        const ic=getIC(r.codigo,idx);const cant=Number(it.cant)||0;const ent=parseNum(ic.entregado);
+        const pend=Math.max(0,cant-ent);const est=ic.int||"Pendiente";
+        const facturada=(est==="Facturada"||est==="Cerrada");
+        const pendFact=facturada?0:ent;
+        if(mode==="PENDENT"&&pend<=0)return;
+        if(mode==="PENDFACT"&&pendFact<=0)return;
+        lines.push({cod:r.codigo,manual:r.manual,emp:r.empresa,region:r.region||"—",comuna:r.comuna||"—",name:name,cant:cant,ent:ent,pend:pend,pendFact:pendFact,est:est});
+      });
+    });
+    if(!lines.length){sum.innerHTML="";out.innerHTML='<div class="muted" style="padding:10px 2px">Sin resultados para «'+esc($("prodq").value.trim())+'»'+(mode!=="ALL"?" con ese estado":"")+'.</div>';return;}
+    let tCant=0,tEnt=0,tPend=0,tPF=0;const ocSet={};
+    lines.forEach(l=>{tCant+=l.cant;tEnt+=l.ent;tPend+=l.pend;tPF+=l.pendFact;ocSet[l.cod]=1;});
+    const card=(lbl,val,col)=>'<div class="kpi"><div class="n"'+(col?' style="color:'+col+'"':'')+'>'+miles(val)+'</div><div class="l">'+lbl+'</div></div>';
+    sum.innerHTML=card("Unidades totales",tCant)+card("Entregadas",tEnt,"#16a34a")+card("Pend. de entrega",tPend,tPend>0?"#d97706":"#16a34a")+card("Pend. de facturación",tPF,tPF>0?"#3b82f6":"#16a34a")+'<div class="kpi"><div class="n">'+Object.keys(ocSet).length+' / '+lines.length+'</div><div class="l">OC / líneas</div></div>';
+    lines.sort((a,b)=>a.region.localeCompare(b.region)||a.cod.localeCompare(b.cod));
+    let h='<div style="overflow:auto"><table class="items" style="width:100%"><thead><tr><th>N° OC</th><th>Empresa</th><th>Región</th><th>Lugar (comuna)</th><th>Producto</th><th class="num">Cant.</th><th class="num">Entreg.</th><th class="num">Pend. entrega</th><th class="num">Pend. fact.</th><th>Estado interno</th></tr></thead><tbody>';
+    lines.forEach(l=>{
+      h+='<tr><td class="code">'+(l.manual?'<span class="pill" style="background:#a855f722;color:#c084fc">PEDIDO</span>':esc(l.cod))+'</td>'+
+        '<td>'+esc(l.emp)+'</td><td>'+esc(l.region)+'</td><td>'+esc(l.comuna)+'</td>'+
+        '<td title="'+esc(l.name)+'">'+esc(l.name)+'</td>'+
+        '<td class="num">'+miles(l.cant)+'</td><td class="num">'+miles(l.ent)+'</td>'+
+        '<td class="num" style="color:'+(l.pend>0?"#d97706":"#16a34a")+';font-weight:'+(l.pend>0?"bold":"normal")+'">'+miles(l.pend)+'</td>'+
+        '<td class="num" style="color:'+(l.pendFact>0?"#3b82f6":"#16a34a")+'">'+miles(l.pendFact)+'</td>'+
+        '<td><span style="color:'+(INTCOLOR[l.est]||"#e8eef4")+'">'+esc(l.est)+'</span></td></tr>';
+    });
+    h+='<tr style="border-top:2px solid #2a3a4d;font-weight:bold"><td colspan="5">TOTAL</td><td class="num">'+miles(tCant)+'</td><td class="num">'+miles(tEnt)+'</td><td class="num" style="color:#d97706">'+miles(tPend)+'</td><td class="num" style="color:#3b82f6">'+miles(tPF)+'</td><td></td></tr>';
+    h+='</tbody></table></div>';
+    out.innerHTML=h;
+  }
+  window.cProdRender=renderProd;
+  (function(){
+    const t=$("prodtoggle");if(!t)return;
+    t.addEventListener("click",()=>{const b=$("prodbody");const open=b.style.display==="none";b.style.display=open?"block":"none";t.textContent=t.textContent.replace(/[▸▾]\s*$/,"")+(open?"▾":"▸");if(open){buildProdList();renderProd();}});
+    ["prodq","prodest","prodemp"].forEach(id=>{const el=$(id);if(el){el.addEventListener("input",renderProd);el.addEventListener("change",renderProd);}});
+    const pc=$("prodclear");if(pc)pc.addEventListener("click",()=>{$("prodq").value="";$("prodest").value="ALL";$("prodemp").value="ALL";renderProd();});
+  })();
   window.cNota=(c,v)=>{setCtrl(c,"notas",v);};
   window.cFleteC=(c,v)=>{setCtrl(c,"fleteCant",normNum(v));renderKPIs();renderTable();};
   window.cFleteU=(c,v)=>{setCtrl(c,"fleteCosto",normNum(v));renderKPIs();renderTable();};
@@ -702,6 +797,9 @@ initGrid(document.querySelector("#view-control table.grid"),"grid_control_v2");
     saveCtrl();saveIC();renderKPIs();renderTable();buildFilters();$("progress").innerHTML="✔ Restaurados datos internos de "+n+" OC desde el Excel.";e.target.value="";});
   $("clear").addEventListener("click",()=>{if(!confirm("Borra la caché de OC (NO borra tus costos, estados ni notas). ¿Continuar?"))return;DET={};OCS=[];DAYL={};try{localStorage.removeItem(CACHEKEY);}catch(e){}renderKPIs();renderTable();buildFilters();$("progress").innerHTML="Caché borrada. Presiona «Actualizar».";});
   $("limpiar").addEventListener("click",()=>{$("q").value="";Object.keys(FILT).forEach(k=>FILT[k].clear());Object.keys(FILT).forEach(renderMS);renderKPIs();renderTable();});
+  $("selall").addEventListener("change",function(){cSelAll(this.checked);});
+  $("bulkapply").addEventListener("click",cBulkApply);
+  $("bulkclear").addEventListener("click",cBulkClear);
   $("load").addEventListener("click",actualizar);$("stop").addEventListener("click",()=>{stopFlag=true;});$("xlsx").addEventListener("click",exportXLSX);
   $("nuevo").addEventListener("click",nuevoPedido);
   ["from","to"].forEach(id=>$(id).addEventListener("change",()=>{$("quick").value="custom";}));

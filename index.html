@@ -57,6 +57,10 @@ if("serviceWorker" in navigator && location.protocol.indexOf("http")===0){
   .lastupd .stale{color:#d97706}
   table{width:100%;border-collapse:collapse;background:var(--panel);border-radius:10px;overflow:hidden}
   table.grid{table-layout:fixed;border-collapse:separate;border-spacing:0}
+  /* En pantallas angostas la tabla no se aplasta ni corta los títulos: mantiene un ancho mínimo
+     y aparece scroll horizontal SOLO dentro de su caja (.tw), sin desbordar la página. En pantallas
+     anchas usa el 100% del espacio igual que antes. */
+  #view-control table.grid{min-width:1240px;max-width:1760px}
   table.grid > tbody > tr.ocrow > td{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;height:31px;vertical-align:middle;font-size:12.5px}
   table.grid > thead th{white-space:normal;overflow:visible;position:relative;top:0;z-index:5;vertical-align:middle;line-height:1.15}
   table.grid > thead th .lbl{display:inline-block;max-width:100%;overflow:visible;white-space:normal;word-break:keep-all;overflow-wrap:normal;hyphens:none;vertical-align:middle;pointer-events:none}
@@ -95,7 +99,7 @@ if("serviceWorker" in navigator && location.protocol.indexOf("http")===0){
   .ms-pop .mshead{display:flex;justify-content:space-between;gap:12px;padding:2px 6px 6px;border-bottom:1px solid #26405c;margin-bottom:4px}
   .ms-pop .mshead a{color:#7fb2ff;font-size:12px;cursor:pointer;text-decoration:none}
   .ms-pop .mshead a:hover{text-decoration:underline}
-  .acc{display:flex;justify-content:space-between;gap:10px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .acc{display:flex;justify-content:flex-end;gap:5px;font-variant-numeric:tabular-nums;white-space:nowrap}
   .acc .s{opacity:.75}
   .kpi .n .acc{gap:6px}
   .pill{display:inline-block;padding:1px 7px;border-radius:20px;font-size:10px;font-weight:bold;white-space:nowrap}
@@ -218,7 +222,7 @@ if("serviceWorker" in navigator && location.protocol.indexOf("http")===0){
     </div>
   </div>
   <table class="grid">
-    <colgroup><col style="width:2.5%"><col style="width:2%"><col style="width:5.5%"><col style="width:7.5%"><col style="width:4.5%"><col style="width:5%"><col style="width:9.5%"><col style="width:6.5%"><col style="width:6.5%"><col style="width:8%"><col style="width:7.5%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:4.5%"><col style="width:5.5%"><col style="width:7%"></colgroup>
+    <colgroup><col style="width:2.2%"><col style="width:2%"><col style="width:5%"><col style="width:9.5%"><col style="width:4.5%"><col style="width:4.5%"><col style="width:10.5%"><col style="width:7%"><col style="width:6.5%"><col style="width:7%"><col style="width:7.5%"><col style="width:5.5%"><col style="width:5.5%"><col style="width:5.5%"><col style="width:4%"><col style="width:5%"><col style="width:6.5%"></colgroup>
     <thead><tr>
       <th style="text-align:center"><input type="checkbox" id="c_selall" title="Seleccionar todas las visibles"></th>
       <th></th>
@@ -348,12 +352,12 @@ function showTab(w){
   document.getElementById("view-comp").style.display=w==="comp"?"":"none";
   document.getElementById("tab-control").classList.toggle("active",w==="control");
   document.getElementById("tab-comp").classList.toggle("active",w==="comp");
-  if(w==="control")initGrid(document.querySelector("#view-control table.grid"),"grid_control_v2");
+  if(w==="control")initGrid(document.querySelector("#view-control table.grid"),"grid_control_v3");
   if(w==="comp")initGrid(document.querySelector("#view-comp table.grid"),"grid_comp_v1");
 }
 document.getElementById("tab-control").addEventListener("click",()=>showTab("control"));
 document.getElementById("tab-comp").addEventListener("click",()=>showTab("comp"));
-initGrid(document.querySelector("#view-control table.grid"),"grid_control_v2");
+initGrid(document.querySelector("#view-control table.grid"),"grid_control_v3");
 
 /* ===================== MÓDULO 1: CONTROL DLM/VENTIA + MARGEN ===================== */
 (function(){
@@ -660,9 +664,20 @@ initGrid(document.querySelector("#view-control table.grid"),"grid_control_v2");
     rows=peds.concat(rows);
     return rows.filter(r=>!r.d||esSen(r.d,r.codigo));
   }
+  // Nombre genérico: ChileCompra concatena Tipo de producto + Modelo (estado
+  // Prevención/Emergencia) + Región. Para el menú dejamos SOLO el tipo genérico,
+  // cortando desde "Región…" y quitando las palabras Prevención/Emergencia.
+  function genericProd(name){
+    let s=(name||"").replace(/\s+/g," ").trim();if(!s)return "";
+    const cut=s.search(/\bREGI[OÓ]N\b/i);           // región es el último campo
+    let base=cut>=0?s.slice(0,cut):s;
+    base=base.replace(/\bPREVENCI[OÓ]N\b/gi,"").replace(/\bEMERGENCIA\b/gi,"");  // saca el estado
+    base=base.replace(/[\s\-\/|,]+Y[\s\-\/|,]*$/i,"").replace(/[\s\-\/|,]+$/,"").replace(/^[\s\-\/|,]+/,"").trim();
+    return base||s;
+  }
   function buildProdList(){
     const set=new Map();
-    prodBase().forEach(r=>getItems(r.codigo).forEach(it=>{const p=(it.prod||"").trim();if(p&&!set.has(p.toLowerCase()))set.set(p.toLowerCase(),p);}));
+    prodBase().forEach(r=>getItems(r.codigo).forEach(it=>{const g=genericProd(it.prod);if(g&&!set.has(g.toLowerCase()))set.set(g.toLowerCase(),g);}));
     const dl=$("prodlist");if(dl)dl.innerHTML=[...set.values()].sort((a,b)=>a.localeCompare(b)).map(p=>'<option value="'+esc(p)+'"></option>').join("");
   }
   function renderProd(){

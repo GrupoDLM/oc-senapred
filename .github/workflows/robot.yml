@@ -1,0 +1,56 @@
+name: Robot SENAPRED (actualiza OC y precios)
+
+on:
+  schedule:
+    - cron: "0 */4 * * *"
+  workflow_dispatch:
+    inputs:
+      backfill_from:
+        description: "Backfill del histórico desde (YYYY-MM-DD). Vacío = incremental (últimos 45 días)."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: robot-senapred
+  cancel-in-progress: false
+
+jobs:
+  robot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install openpyxl
+
+      - name: Traer OC de SENAPRED (Mercado Publico)
+        env:
+          MP_TICKET: ${{ secrets.MP_TICKET }}
+        run: |
+          if [ -n "${{ github.event.inputs.backfill_from }}" ]; then
+            python robot.py --from "${{ github.event.inputs.backfill_from }}"
+          else
+            python robot.py --days 45
+          fi
+
+      - name: Actualizar precios CM Emergencia (best-effort)
+        run: python update_maestra.py || echo "maestra no actualizada"
+
+      - name: Publicar resultados
+        run: |
+          git config user.name  "robot-senapred"
+          git config user.email "robot@users.noreply.github.com"
+          git add data/ocs.json data/productos.json 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "Sin cambios que publicar."
+          else
+            git commit -m "Robot: actualizacion $(date -u +%FT%TZ)"
+            git push
+          fi

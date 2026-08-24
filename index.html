@@ -13,6 +13,22 @@
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- Firebase (acceso compartido + registro de quién editó). Si no cargan, el dashboard sigue funcionando en modo local. -->
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+<script>
+  window.FBCONFIG={
+    apiKey:"AIzaSyBFxCnbembrStWiMiyEwewBHnHqpDdRmaU",
+    authDomain:"control-oc-senapred.firebaseapp.com",
+    projectId:"control-oc-senapred",
+    storageBucket:"control-oc-senapred.firebasestorage.app",
+    messagingSenderId:"345079062385",
+    appId:"1:345079062385:web:042a56898c62eb88c2e0d0"
+  };
+  window.FB_ADMIN="rdelamazav@gmail.com";               // administrador fijo (siempre manda)
+  window.FB_DEFAULT_EDITORS=["elisaleay@gmail.com"];     // editores iniciales (luego se administran desde el panel)
+</script>
 <script>
 /* Registro del service worker: hace la app instalable y que se actualice sola.
    Solo funciona cuando la página se sirve por http(s) (ej. GitHub Pages), no como archivo local. */
@@ -24,13 +40,18 @@ if("serviceWorker" in navigator && location.protocol.indexOf("http")===0){
   :root{--bg:#0f1720;--panel:#16212e;--panel2:#1c2a3a;--line:#2a3b4d;--txt:#e8eef4;--muted:#93a4b6;--accent:#3b82f6;--accent2:#2563eb;}
   *{box-sizing:border-box}
   body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);font-size:13px}
-  header{background:linear-gradient(180deg,#16212e,#0f1720);border-bottom:1px solid var(--line);padding:9px 12px 0;position:sticky;top:0;z-index:10}
+  header{background:linear-gradient(180deg,#16212e,#0f1720);border-bottom:1px solid var(--line);padding:9px 0 0;position:sticky;top:0;z-index:10}
   h1{font-size:15px;margin:0 0 1px}
   .sub{color:var(--muted);font-size:11.5px;margin-bottom:6px}
   .tabs{display:flex;gap:4px}
   .tab{background:transparent;color:var(--muted);border:1px solid var(--line);border-bottom:none;padding:6px 16px;border-radius:9px 9px 0 0;font-size:12.5px;font-weight:bold;cursor:pointer}
   .tab.active{background:var(--panel2);color:var(--txt)}
-  .wrap{padding:10px 12px;max-width:none;margin:0}
+  /* Layout fluido: se adapta solo al monitor donde se abre.
+     - 27" (y monitores anchos): aprovecha hasta 2100px, centrado, con márgenes que escalan.
+     - 14" / notebook: ocupa todo el ancho; si no alcanza, la tabla scrollea dentro de su caja.
+     Los márgenes laterales crecen con la pantalla (clamp con vw). */
+  .wrap{max-width:2900px;margin:0 auto;padding:14px clamp(16px,1.4vw,40px)}
+  .hwrap{max-width:2900px;margin:0 auto;padding:0 clamp(16px,1.4vw,40px)}
   .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-bottom:8px}
   .fld{display:flex;flex-direction:column;gap:4px}
   .fld label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
@@ -60,14 +81,14 @@ if("serviceWorker" in navigator && location.protocol.indexOf("http")===0){
   /* En pantallas angostas la tabla no se aplasta ni corta los títulos: mantiene un ancho mínimo
      y aparece scroll horizontal SOLO dentro de su caja (.tw), sin desbordar la página. En pantallas
      anchas usa el 100% del espacio igual que antes. */
-  #view-control table.grid{min-width:1240px;max-width:1760px}
+  #view-control table.grid{min-width:1240px}
   table.grid > tbody > tr.ocrow > td{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;height:31px;vertical-align:middle;font-size:12.5px}
   table.grid > thead th{white-space:normal;overflow:visible;position:relative;top:0;z-index:5;vertical-align:middle;line-height:1.15}
   table.grid > thead th .lbl{display:inline-block;max-width:100%;overflow:visible;white-space:normal;word-break:keep-all;overflow-wrap:normal;hyphens:none;vertical-align:middle;pointer-events:none}
   .colrz{position:absolute;top:0;right:0;width:9px;height:100%;cursor:col-resize;z-index:3}
   .colrz:hover{background:var(--accent)}
   table.grid.rzing{user-select:none;cursor:col-resize}
-  .tw{overflow:auto;max-height:78vh;border-radius:10px;border:1px solid var(--line)}
+  .tw{overflow:auto;max-height:78vh;border-radius:10px;border:1px solid var(--line);scrollbar-gutter:stable}
   th,td{padding:4px 7px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
   th{background:var(--panel2);font-size:10.5px;text-transform:uppercase;letter-spacing:.02em;color:var(--muted);position:sticky;top:0;cursor:pointer;white-space:nowrap;padding:5px 7px;vertical-align:middle}
   table.grid > thead th{white-space:normal}
@@ -119,6 +140,20 @@ if("serviceWorker" in navigator && location.protocol.indexOf("http")===0){
   .items tr.fleterow td:first-child{color:#f0b429;font-weight:600}
   .items tr.totrow td{background:#12263f;border-top:2px solid #34557f;font-weight:700;font-size:13px}
   .items tr.totrow td:first-child{color:#cfe0f0;letter-spacing:.03em}
+  /* Tabla "Detalle por producto": misma estructura que la de OC (recuadro, encabezado
+     fijo, fila TOTAL) pero con acento TEAL para distinguirla. Encuadrada y acotada para
+     que las columnas no queden anchas de más. */
+  #c_prodscroll{overflow:auto;max-height:56vh;max-width:1520px;border-radius:9px;border:1px solid #2f7266;scrollbar-gutter:stable}
+  #c_prodout table{table-layout:fixed;width:100%;min-width:900px;overflow:visible;border:0;border-radius:0}
+  #c_prodout th{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.15;vertical-align:middle}
+  #c_prodout td{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+  #c_prodout td.num,#c_prodout th.num{text-align:right}
+  /* Encabezado fijo (teal) al hacer scroll vertical dentro del cuadro */
+  #c_prodout thead th{position:sticky;top:0;z-index:2;background:#123029;color:#9ad9cc;border-bottom:1px solid #2f7266}
+  #c_prodout thead th:hover{background:#173a33}
+  #c_prodout tr.totrow td{background:#123029;border-top:2px solid #2f7266}
+  #c_prodout tr.totrow td:first-child{color:#9ad9cc}
+  #c_prodpanel .pill{font-size:11px;padding:1px 7px}
   .muted{color:var(--muted)}
   .rank td,.rank th{padding:6px 8px}
   .rankbar{height:6px;background:var(--accent);border-radius:4px;margin-top:3px}
@@ -155,17 +190,51 @@ if("serviceWorker" in navigator && location.protocol.indexOf("http")===0){
   .matx td.name,.matx th.name{text-align:left;position:sticky;left:0;background:var(--panel)}
   .matx tr.us td{background:#12253d}.matx tr.us td.name{background:#12253d;box-shadow:inset 3px 0 0 var(--accent);font-weight:bold}
   .matx tr.tot td{border-top:2px solid #33465a;font-weight:bold;background:#0e1a27}
+  /* Acceso compartido / auditoría */
+  .authbtn{background:#1a2836;border:1px solid #34557f;color:#cfe0f0;border-radius:7px;padding:5px 12px;cursor:pointer;font-size:12px;font-weight:600}
+  .authbtn:hover{background:#22405e}
+  .authpill{background:#123029;border:1px solid #2f7266;color:#9ad9cc;border-radius:20px;padding:3px 10px;font-weight:600}
+  .authlink{color:#7fb2ff;cursor:pointer;text-decoration:none}
+  .authlink:hover{text-decoration:underline}
+  .modal-ov{position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:1000;display:flex;align-items:center;justify-content:center}
+  .modal-bx{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;max-width:600px;width:92%;max-height:84vh;overflow:auto;box-shadow:0 22px 64px rgba(0,0,0,.65)}
+  .modal-bx h3{margin:0 0 8px}
+  .modal-bx label{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px}
+  .modal-bx textarea{width:100%;min-height:88px;background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px;font-size:13px;box-sizing:border-box}
+  .audit-row{border-bottom:1px solid var(--line);padding:6px 2px;font-size:12.5px}
+  .audit-row .who{color:#9ad9cc;font-weight:600}
+  .audit-row .when{color:var(--muted)}
+  body.ro .grid select.est,body.ro .grid input.nota,body.ro .dbox input,body.ro .dbox select,body.ro .dbox textarea,body.ro #c_nuevo,body.ro #c_bulkbar,body.ro #c_import,body.ro .selchk,body.ro #c_selall{pointer-events:none;opacity:.5}
+  .edited-tag{font-size:10.5px;color:#7fb8ac;margin-left:6px;white-space:nowrap}
 </style>
 </head>
 <body>
 <header>
-  <h1>Control de Órdenes de Compra de SENAPRED — DLM &amp; VENTIA</h1>
+  <div class="hwrap" style="position:relative">
+  <div id="c_authbar" style="position:absolute;top:2px;right:0;display:flex;align-items:center;gap:8px;font-size:12px"></div>
+  <h1>Control de Órdenes de Compra de SENAPRED — Grupo DLM</h1>
   <div class="sub">OC que SENAPRED emite a DLM (77.346.435-9) y VENTIA (77.798.686-4) · Datos en vivo desde Mercado Público</div>
   <div class="tabs">
     <button class="tab active" id="tab-control">Mis OC (DLM / VENTIA)</button>
     <button class="tab" id="tab-comp">Análisis Competencia</button>
   </div>
+  </div>
 </header>
+<div id="c_adminmodal" class="modal-ov" style="display:none"><div class="modal-bx">
+  <h3>👥 Administrar accesos</h3>
+  <div style="font-size:12.5px;color:#8aa0b4;margin-bottom:6px">Escribe un correo Google por línea. Los <b>editores</b> pueden ver y editar; los de <b>solo lectura</b> solo ven. Tú (administrador) siempre tienes acceso total.</div>
+  <label>Editores (pueden editar)</label>
+  <textarea id="c_ed_editors" placeholder="persona1@gmail.com&#10;persona2@gmail.com"></textarea>
+  <label>Solo lectura (solo ven)</label>
+  <textarea id="c_ed_viewers" placeholder="persona3@gmail.com"></textarea>
+  <div style="margin-top:12px;display:flex;gap:8px;align-items:center"><button id="c_admin_save" class="authbtn" style="background:#14b8a6;border-color:#14b8a6;color:#062b25">Guardar</button><button id="c_admin_close" class="authbtn">Cerrar</button><span id="c_admin_msg" style="font-size:12px;color:#9ad9cc"></span></div>
+</div></div>
+<div id="c_auditmodal" class="modal-ov" style="display:none"><div class="modal-bx">
+  <h3>🕑 Historial de cambios</h3>
+  <div id="c_audit_sub" style="font-size:12px;color:#8aa0b4;margin-bottom:8px"></div>
+  <div id="c_audit_body">Cargando…</div>
+  <div style="margin-top:12px"><button id="c_audit_close" class="authbtn">Cerrar</button></div>
+</div></div>
 
 <!-- ============ VISTA 1: CONTROL DLM / VENTIA ============ -->
 <section id="view-control"><div class="wrap">
@@ -204,25 +273,23 @@ if("serviceWorker" in navigator && location.protocol.indexOf("http")===0){
     <button id="c_bulkapply">Aplicar a las seleccionadas</button>
     <button class="sec" id="c_bulkclear">Limpiar selección</button>
   </div>
-  <div id="c_prodpanel" style="margin:6px 0 10px;border:1px solid #2a3a4d;border-radius:8px;overflow:hidden">
-    <button id="c_prodtoggle" style="width:100%;text-align:left;background:#16202c;border:0;color:#e8eef4;padding:10px 12px;cursor:pointer;font-size:14px">📦 Buscar por producto (unidades pendientes de entrega / facturación y en qué lugar) ▸</button>
-    <div id="c_prodbody" style="display:none;padding:12px;background:#0f1720">
+  <div id="c_prodpanel" style="margin:6px 0 10px;border:1px solid #2f7266;border-radius:9px;overflow:hidden;box-shadow:inset 3px 0 0 #14b8a6">
+    <button id="c_prodtoggle" style="width:100%;text-align:left;background:#123029;border:0;color:#c7f0e6;padding:10px 12px;cursor:pointer;font-size:14px;font-weight:600">📦 Detalle por producto <span style="font-weight:400;color:#7fb8ac">— unidades pendientes de entrega / facturación y en qué lugar</span> <span id="c_prodarrow">▸</span></button>
+    <div id="c_prodbody" style="display:none;padding:12px;background:#0d1a17">
+      <div style="font-size:11.5px;color:#7fb8ac;margin:0 0 8px">Los filtros de arriba (Empresa, Región, Estado interno, N° OC, etc.) aplican también a esta tabla. Aquí agregas los específicos de producto:</div>
       <div class="controls" style="margin:0 0 10px">
-        <div class="fld"><label>Producto (escribe parte del nombre)</label><input id="c_prodq" list="c_prodlist" placeholder="ej: agua 1,6" style="min-width:260px"><datalist id="c_prodlist"></datalist></div>
-        <div class="fld"><label>Estado</label><select id="c_prodest" style="min-width:190px">
-          <option value="ALL">Todos los estados</option>
-          <option value="PENDENT">Pendientes de entrega</option>
-          <option value="PENDFACT">Pendientes de facturación</option>
-        </select></div>
-        <div class="fld"><label>Empresa</label><select id="c_prodemp" style="min-width:120px"><option value="ALL">Ambas</option><option value="DLM">DLM</option><option value="VENTIA">VENTIA</option></select></div>
+        <div class="fld"><label>Producto</label><div class="ms" id="c_ms_pprod"></div></div>
+        <div class="fld"><label>Línea</label><div class="ms" id="c_ms_plin"></div></div>
+        <div class="fld"><label>Pendientes</label><div class="ms" id="c_ms_pest"></div></div>
         <div class="fld"><label>&nbsp;</label><button class="sec" id="c_prodclear">Limpiar</button></div>
       </div>
       <div id="c_prodsum" class="kpis" style="margin-bottom:10px"></div>
       <div id="c_prodout"></div>
     </div>
   </div>
+  <div style="font-size:14px;font-weight:600;color:#e8eef4;margin:10px 0 6px">🗂 Detalle por OC</div>
   <table class="grid">
-    <colgroup><col style="width:2.2%"><col style="width:2%"><col style="width:5%"><col style="width:9.5%"><col style="width:4.5%"><col style="width:4.5%"><col style="width:10.5%"><col style="width:7%"><col style="width:6.5%"><col style="width:7%"><col style="width:7.5%"><col style="width:5.5%"><col style="width:5.5%"><col style="width:5.5%"><col style="width:4%"><col style="width:5%"><col style="width:6.5%"></colgroup>
+    <colgroup><col style="width:2.5%"><col style="width:2%"><col style="width:5%"><col style="width:9.5%"><col style="width:4.5%"><col style="width:5%"><col style="width:10.5%"><col style="width:7%"><col style="width:6.5%"><col style="width:7%"><col style="width:7.5%"><col style="width:5.5%"><col style="width:5.5%"><col style="width:5.5%"><col style="width:5%"><col style="width:5%"><col style="width:6.5%"></colgroup>
     <thead><tr>
       <th style="text-align:center"><input type="checkbox" id="c_selall" title="Seleccionar todas las visibles"></th>
       <th></th>
@@ -371,8 +438,14 @@ initGrid(document.querySelector("#view-control table.grid"),"grid_control_v3");
   const ESTCOMPRA=["Por comprar","Cotizando","Comprado","Recibido","Facturado"];
   let OCS=[],DET={},DAYL={},CTRL=loadCtrl(),ICOST=loadIC(),PEDIDOS=loadPed(),running=false,stopFlag=false,sortK="fecha",sortDir=-1,expanded={},selected={};
   /* ---- Filtros multi-selección (marcar varias opciones por menú) ---- */
-  const FILT={femp:new Set(),fcod:new Set(),fint:new Set(),fmp:new Set(),ffemer:new Set(),ffact:new Set(),freg:new Set(),fcom:new Set()};
-  const MSOPTS={},MSLABEL={femp:"Todas",fcod:"Todas",fint:"Todos",fmp:"Todos",ffemer:"Todos",ffact:"Todas",freg:"Todas",fcom:"Todas"};
+  const FILT={femp:new Set(),fcod:new Set(),fint:new Set(),fmp:new Set(),ffemer:new Set(),ffact:new Set(),freg:new Set(),fcom:new Set(),
+              pprod:new Set(),pest:new Set(),pemp:new Set(),plin:new Set(),preg:new Set(),pint:new Set()};
+  const MSOPTS={},MSLABEL={femp:"Todas",fcod:"Todas",fint:"Todos",fmp:"Todos",ffemer:"Todos",ffact:"Todas",freg:"Todas",fcom:"Todas",
+              pprod:"Todos",pest:"Todos",pemp:"Ambas",plin:"Todas",preg:"Todas",pint:"Todos"};
+  const FKEY="dlm_filters_v1";
+  function saveFILT(){try{const o={};Object.keys(FILT).forEach(k=>o[k]=[...FILT[k]]);localStorage.setItem(FKEY,JSON.stringify(o));}catch(e){}}
+  function loadFILT(){try{const o=JSON.parse(localStorage.getItem(FKEY)||"{}");Object.keys(o).forEach(k=>{if(FILT[k]&&Array.isArray(o[k]))o[k].forEach(v=>FILT[k].add(v));});}catch(e){}}
+  loadFILT();  // los filtros quedan aplicados entre recargas y actualizaciones de datos
   const SINFACT="__SINFACT__";
   function msText(key){const s=FILT[key],opts=MSOPTS[key]||[];if(!s.size)return MSLABEL[key];if(s.size===1){const v=[...s][0],o=opts.find(o=>o.v===v);return o?o.t:v;}return s.size+" seleccionadas";}
   function renderMS(key){const box=document.getElementById("c_ms_"+key);if(!box)return;const s=FILT[key],opts=MSOPTS[key]||[];
@@ -385,18 +458,19 @@ initGrid(document.querySelector("#view-control table.grid"),"grid_control_v3");
   function setMS(key,opts){MSOPTS[key]=opts;renderMS(key);}
   function msBtnRefresh(key){const box=document.getElementById("c_ms_"+key);const btn=box&&box.querySelector(".ms-btn");if(btn){btn.textContent=msText(key);btn.classList.toggle("on",FILT[key].size>0);}}
   window.cMSopen=(ev,key)=>{if(ev)ev.stopPropagation();const pop=document.getElementById("c_pop_"+key);if(!pop)return;const wasOpen=pop.classList.contains("open");document.querySelectorAll(".ms-pop.open").forEach(p=>p.classList.remove("open"));if(!wasOpen)pop.classList.add("open");};
-  window.cMStoggle=(key,v,on)=>{if(on)FILT[key].add(v);else FILT[key].delete(v);msBtnRefresh(key);renderKPIs();renderTable();};
-  window.cMSall=(key,all)=>{const opts=MSOPTS[key]||[];FILT[key]=new Set(all?opts.map(o=>o.v):[]);const pop=document.getElementById("c_pop_"+key);if(pop)pop.querySelectorAll("input[type=checkbox]").forEach(cb=>{cb.checked=all;});msBtnRefresh(key);renderKPIs();renderTable();};
+  function msApply(key){saveFILT();renderKPIs();renderTable();renderProd();}  // todo filtro aplica a AMBAS tablas y queda guardado
+  window.cMStoggle=(key,v,on)=>{if(on)FILT[key].add(v);else FILT[key].delete(v);msBtnRefresh(key);msApply(key);};
+  window.cMSall=(key,all)=>{const opts=MSOPTS[key]||[];FILT[key]=new Set(all?opts.map(o=>o.v):[]);const pop=document.getElementById("c_pop_"+key);if(pop)pop.querySelectorAll("input[type=checkbox]").forEach(cb=>{cb.checked=all;});msBtnRefresh(key);msApply(key);};
   document.addEventListener("click",e=>{if(!e.target.closest||!e.target.closest(".ms"))document.querySelectorAll("#view-control .ms-pop.open").forEach(p=>p.classList.remove("open"));});
 
   function loadCtrl(){try{return JSON.parse(localStorage.getItem(LSKEY)||"{}");}catch(e){return{};}}
   function saveCtrl(){try{localStorage.setItem(LSKEY,JSON.stringify(CTRL));}catch(e){}}
-  function getCtrl(code){return CTRL[code]||{interno:"Pendiente",notas:"",flete:"",fleteCant:"1",fleteCosto:"",guias:"",facturas:""};}
-  function setCtrl(code,f,v){const c=getCtrl(code);c[f]=v;CTRL[code]=c;saveCtrl();}
+  function getCtrl(code){return Object.assign({interno:"Pendiente",notas:"",flete:"",fleteCant:"1",fleteCosto:"",guias:"",facturas:""},CTRL[code]||{});}
+  function setCtrl(code,f,v){const c=getCtrl(code);const old=c[f];c[f]=v;CTRL[code]=c;saveCtrl();fbEdit("control",code,f,old,v);}
   function loadIC(){try{return JSON.parse(localStorage.getItem(ICKEY)||"{}");}catch(e){return{};}}
   function saveIC(){try{localStorage.setItem(ICKEY,JSON.stringify(ICOST));}catch(e){}}
-  function getIC(code,idx){return ICOST[code+"#"+idx]||{costo:"",prov:"",int:"Pendiente",guia:"",fact:"",entregado:""};}
-  function setIC(code,idx,f,v){const k=code+"#"+idx;const c=ICOST[k]||{costo:"",prov:"",int:"Pendiente",guia:"",fact:"",entregado:""};c[f]=v;ICOST[k]=c;saveIC();}
+  function getIC(code,idx){return Object.assign({costo:"",prov:"",int:"Pendiente",guia:"",fact:"",entregado:""},ICOST[code+"#"+idx]||{});}
+  function setIC(code,idx,f,v){const k=code+"#"+idx;const c=ICOST[k]||{costo:"",prov:"",int:"Pendiente",guia:"",fact:"",entregado:""};const old=c[f];c[f]=v;ICOST[k]=c;saveIC();fbEdit("itemcost",k,f,old,v);}
   function autoGeneral(code){const its=getItems(code);if(!its.length)return;const st=its.map((it,i)=>getIC(code,i).int||"Pendiente");let g=null;
     if(st.every(s=>s==="Facturada"))g="Facturada";else if(st.every(s=>s==="Entregada"||s==="Facturada"))g="Entregada";
     if(g&&getCtrl(code).interno!==g)setCtrl(code,"interno",g);}
@@ -447,7 +521,7 @@ initGrid(document.querySelector("#view-control table.grid"),"grid_control_v3");
     p.items=p.items||[];p.items.push({prod:it.nombre,cant:1,pu:pr?String(pr.p):""});savePed();
     if(qi)qi.value="";renderKPIs();renderTable();};
   function loadPed(){try{return JSON.parse(localStorage.getItem(PEDKEY)||"{}");}catch(e){return{};}}
-  function savePed(){try{localStorage.setItem(PEDKEY,JSON.stringify(PEDIDOS));}catch(e){}}
+  function savePed(){try{localStorage.setItem(PEDKEY,JSON.stringify(PEDIDOS));}catch(e){}fbSyncPedidos();}
   function lineVenta(it){return(it.tot!=null&&it.tot!=="")?parseNum(it.tot):parseNum(it.pu)*(parseNum(it.cant)||0);}
   function miles(n){n=Math.round(parseNum(n));const s=Math.abs(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g,".");return (n<0?"-":"")+s;}
   function milesDisp(v){return (v==null||String(v).trim()==="")?"":miles(v);}
@@ -519,12 +593,27 @@ initGrid(document.querySelector("#view-control table.grid"),"grid_control_v3");
     return{codigo:o.codigo,manual:false,pedido:null,empresa:o.empresa||"",fecha:(d&&d.fEnvio)?String(d.fEnvio).slice(0,10):o.fecha,nombre:o.nombre,comprador:d?(d.organismo||""):"",region:lug.region,comuna:lug.comuna,lugar:[lug.comuna,lug.region].filter(Boolean).join(", "),femer:femerOf(d),estadoTxt:info.l,estadoColor:info.c,estadoCod:cod,interno:ct.interno,notas:ct.notas,prodsum:d?(d.items||[]).map(i=>i.prod).join(" "):"",venta:cc.venta,costo:cc.hasCost?cc.costo:null,margen:cc.hasCost?cc.margen:null,pct:cc.hasCost?cc.pct:null,cc:cc,d:d};}
   function pedRow(p){const cc=ocCalc(p.id);const ct=getCtrl(p.id);
     return{codigo:p.id,manual:true,pedido:p,empresa:p.empresa||"",fecha:p.fecha||"",nombre:p.nombre||"",comprador:"",region:p.region||"",comuna:p.comuna||"",lugar:[p.comuna,p.region].filter(Boolean).join(", "),femer:p.femer||"",estadoTxt:"Pedido (sin OC)",estadoColor:"#a855f7",estadoCod:"PED",interno:ct.interno,notas:ct.notas,prodsum:(p.items||[]).map(i=>i.prod).join(" "),venta:cc.venta,costo:cc.hasCost?cc.costo:null,margen:cc.hasCost?cc.margen:null,pct:cc.hasCost?cc.pct:null,cc:cc,d:null};}
+  // ¿la OC tiene alguna línea que cumpla los filtros de producto? (para que esos
+  // filtros del panel de producto también apliquen a la tabla de OC)
+  function ocMatchesProd(r){
+    const selProd=FILT.pprod,selLin=FILT.plin,selEst=FILT.pest;
+    if(!selProd.size&&!selLin.size&&!selEst.size)return true;
+    const its=getItems(r.codigo);
+    for(let idx=0;idx<its.length;idx++){const it=its[idx];const name=it.prod||"";
+      if(selProd.size&&!selProd.has(genericProd(name)))continue;
+      if(selLin.size&&!selLin.has(prodLinea(name)||"—"))continue;
+      if(selEst.size){const ic=getIC(r.codigo,idx);const cant=Number(it.cant)||0;const ent=parseNum(ic.entregado);const pend=Math.max(0,cant-ent);const est=ic.int||"Pendiente";const facturada=(est==="Facturada"||est==="Cerrada");const pendFact=facturada?0:ent;const okEnt=selEst.has("PENDENT")&&pend>0,okFac=selEst.has("PENDFACT")&&pendFact>0;if(!(okEnt||okFac))continue;}
+      return true;
+    }
+    return false;
+  }
   function currentView(){
     const q=$("q").value.trim().toLowerCase();
     let rows=OCS.map(row);
     const peds=Object.keys(PEDIDOS).filter(id=>!PEDIDOS[id].linked).map(id=>pedRow(PEDIDOS[id]));
     rows=peds.concat(rows);
     rows=rows.filter(r=>!r.d||esSen(r.d,r.codigo)); // Centro de Mando SENAPRED-only: filtro siempre activo
+    rows=rows.filter(ocMatchesProd); // filtros de producto (Producto/Línea/Pendientes) también recortan la tabla de OC
     if(FILT.femp.size)rows=rows.filter(r=>FILT.femp.has(r.empresa));
     if(FILT.fcod.size)rows=rows.filter(r=>FILT.fcod.has(r.codigo));
     if(FILT.freg.size)rows=rows.filter(r=>FILT.freg.has(r.region));
@@ -675,57 +764,78 @@ initGrid(document.querySelector("#view-control table.grid"),"grid_control_v3");
     base=base.replace(/[\s\-\/|,]+Y[\s\-\/|,]*$/i,"").replace(/[\s\-\/|,]+$/,"").replace(/^[\s\-\/|,]+/,"").trim();
     return base||s;
   }
+  function prodLinea(name){const u=(name||"").toUpperCase();const e=/\bEMERGENCIA\b/.test(u),p=/\bPREVENCI[OÓ]N\b/.test(u);if(e&&p)return "Prev.+Emerg.";if(e)return "Emergencia";if(p)return "Prevención";return "";}
+  let prodSort={k:"gen",dir:1};
+  window.cProdSort=(k)=>{if(prodSort.k===k)prodSort.dir*=-1;else{prodSort.k=k;prodSort.dir=1;}renderProd();};
   function buildProdList(){
-    const set=new Map();
-    prodBase().forEach(r=>getItems(r.codigo).forEach(it=>{const g=genericProd(it.prod);if(g&&!set.has(g.toLowerCase()))set.set(g.toLowerCase(),g);}));
-    const dl=$("prodlist");if(dl)dl.innerHTML=[...set.values()].sort((a,b)=>a.localeCompare(b)).map(p=>'<option value="'+esc(p)+'"></option>').join("");
+    const prod=new Map(),reg=new Set(),lin=new Set();
+    prodBase().forEach(r=>{if(r.region)reg.add(r.region);getItems(r.codigo).forEach(it=>{const g=genericProd(it.prod);if(g)prod.set(g.toLowerCase(),g);const l=prodLinea(it.prod);if(l)lin.add(l);});});
+    setMS("pprod",[...prod.values()].sort((a,b)=>a.localeCompare(b)).map(p=>({v:p,t:p})));
+    setMS("plin",[...lin].sort().map(v=>({v:v,t:v})));
+    setMS("pest",[{v:"PENDENT",t:"Pendientes de entrega"},{v:"PENDFACT",t:"Pendientes de facturación"}]);
   }
   function renderProd(){
     const out=$("prodout"),sum=$("prodsum");if(!out)return;
-    const toks=$("prodq").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    const mode=$("prodest").value,emp=$("prodemp").value;
-    if(!toks.length){sum.innerHTML="";out.innerHTML='<div class="muted" style="padding:10px 2px">Escribe parte del nombre de un producto (ej: «agua 1,6») para ver, en todas las regiones, cuántas unidades hay y cuáles están pendientes de entrega o de facturación, y en qué lugar.</div>';return;}
+    const selProd=FILT.pprod,selEst=FILT.pest,selLin=FILT.plin;
+    const anyTop=FILT.femp.size||FILT.freg.size||FILT.fcom.size||FILT.fcod.size||FILT.ffemer.size||FILT.fmp.size||FILT.ffact.size||FILT.fint.size;
+    const anyFilter=selProd.size||selEst.size||selLin.size||anyTop;
+    if(!anyFilter){sum.innerHTML="";out.innerHTML='<div class="muted" style="padding:10px 2px">Elige uno o más filtros (arriba: Empresa, Región, Estado interno…, o aquí: Producto, Línea, Pendientes) para ver, en todas las regiones, cuántas unidades hay y cuáles están pendientes de entrega o de facturación, y en qué lugar.</div>';return;}
     const lines=[];
     prodBase().forEach(r=>{
-      if(emp!=="ALL"&&r.empresa!==emp)return;
+      if(FILT.femp.size&&!FILT.femp.has(r.empresa))return;
+      if(FILT.freg.size&&!FILT.freg.has(r.region))return;
+      if(FILT.fcom.size&&!FILT.fcom.has(r.comuna))return;
+      if(FILT.fcod.size&&!FILT.fcod.has(r.codigo))return;
+      if(FILT.ffemer.size&&!FILT.ffemer.has(r.femer))return;
+      if(FILT.fmp.size&&!FILT.fmp.has(String(r.estadoCod)))return;
+      if(FILT.ffact.size){const fs=r.manual?[]:factOf(r.codigo);if(!fs.length){if(!FILT.ffact.has(SINFACT))return;}else if(!fs.some(f=>FILT.ffact.has(f)))return;}
       getItems(r.codigo).forEach((it,idx)=>{
-        const name=(it.prod||"");const low=name.toLowerCase();
-        if(!toks.every(t=>low.includes(t)))return;
+        const name=(it.prod||"");const gen=genericProd(name);const linea=prodLinea(name);
+        if(selProd.size&&!selProd.has(gen))return;
+        if(selLin.size&&!selLin.has(linea||"—"))return;
         const ic=getIC(r.codigo,idx);const cant=Number(it.cant)||0;const ent=parseNum(ic.entregado);
         const pend=Math.max(0,cant-ent);const est=ic.int||"Pendiente";
+        if(FILT.fint.size&&!FILT.fint.has(est))return;
         const facturada=(est==="Facturada"||est==="Cerrada");
         const pendFact=facturada?0:ent;
-        if(mode==="PENDENT"&&pend<=0)return;
-        if(mode==="PENDFACT"&&pendFact<=0)return;
-        lines.push({cod:r.codigo,manual:r.manual,emp:r.empresa,region:r.region||"—",comuna:r.comuna||"—",name:name,cant:cant,ent:ent,pend:pend,pendFact:pendFact,est:est});
+        if(selEst.size){const okEnt=selEst.has("PENDENT")&&pend>0,okFac=selEst.has("PENDFACT")&&pendFact>0;if(!(okEnt||okFac))return;}
+        lines.push({cod:r.codigo,manual:r.manual,emp:r.empresa,region:r.region||"—",comuna:r.comuna||"—",gen:gen,linea:linea||"—",cant:cant,ent:ent,pend:pend,pendFact:pendFact,est:est});
       });
     });
-    if(!lines.length){sum.innerHTML="";out.innerHTML='<div class="muted" style="padding:10px 2px">Sin resultados para «'+esc($("prodq").value.trim())+'»'+(mode!=="ALL"?" con ese estado":"")+'.</div>';return;}
+    if(!lines.length){sum.innerHTML="";out.innerHTML='<div class="muted" style="padding:10px 2px">Sin resultados para los filtros elegidos.</div>';return;}
     let tCant=0,tEnt=0,tPend=0,tPF=0;const ocSet={};
     lines.forEach(l=>{tCant+=l.cant;tEnt+=l.ent;tPend+=l.pend;tPF+=l.pendFact;ocSet[l.cod]=1;});
     const card=(lbl,val,col)=>'<div class="kpi"><div class="n"'+(col?' style="color:'+col+'"':'')+'>'+miles(val)+'</div><div class="l">'+lbl+'</div></div>';
     sum.innerHTML=card("Unidades totales",tCant)+card("Entregadas",tEnt,"#16a34a")+card("Pend. de entrega",tPend,tPend>0?"#d97706":"#16a34a")+card("Pend. de facturación",tPF,tPF>0?"#3b82f6":"#16a34a")+'<div class="kpi"><div class="n">'+Object.keys(ocSet).length+' / '+lines.length+'</div><div class="l">OC / líneas</div></div>';
-    lines.sort((a,b)=>a.region.localeCompare(b.region)||a.cod.localeCompare(b.cod));
-    let h='<div style="overflow:auto"><table class="items" style="width:100%"><thead><tr><th>N° OC</th><th>Empresa</th><th>Región</th><th>Lugar (comuna)</th><th>Producto</th><th class="num">Cant.</th><th class="num">Entreg.</th><th class="num">Pend. entrega</th><th class="num">Pend. fact.</th><th>Estado interno</th></tr></thead><tbody>';
+    const numK={cant:1,ent:1,pend:1,pendFact:1};
+    lines.sort((a,b)=>{const k=prodSort.k,d=prodSort.dir;if(numK[k])return((a[k]||0)-(b[k]||0))*d;let x=(a[k]==null?"":String(a[k])).toLowerCase(),y=(b[k]==null?"":String(b[k])).toLowerCase();return x<y?-d:x>y?d:0;});
+    const cols=[{k:"cod",t:"N° OC"},{k:"emp",t:"Empresa"},{k:"gen",t:"Producto"},{k:"linea",t:"Línea"},{k:"region",t:"Región"},{k:"comuna",t:"Lugar (comuna)"},{k:"cant",t:"Cant.",n:1},{k:"ent",t:"Entreg.",n:1},{k:"pend",t:"Pend. entrega",n:1},{k:"pendFact",t:"Pend. fact.",n:1},{k:"est",t:"Estado interno"}];
+    const ind=k=>prodSort.k===k?'<span style="color:#7fe0cf"> '+(prodSort.dir>0?"▲":"▼")+'</span>':'<span style="opacity:.3"> ⇅</span>';
+    let h='<div id="c_prodscroll"><table class="items">'+
+      '<colgroup><col style="width:10%"><col style="width:6%"><col style="width:20%"><col style="width:7%"><col style="width:13%"><col style="width:9.5%"><col style="width:5.5%"><col style="width:5.5%"><col style="width:7%"><col style="width:6.5%"><col style="width:10%"></colgroup>'+
+      '<thead><tr>'+cols.map(c=>'<th'+(c.n?' class="num"':'')+' style="cursor:pointer" onclick="cProdSort(\''+c.k+'\')" title="Ordenar por '+esc(c.t)+'">'+esc(c.t)+ind(c.k)+'</th>').join("")+'</tr></thead><tbody>';
     lines.forEach(l=>{
-      h+='<tr><td class="code">'+(l.manual?'<span class="pill" style="background:#a855f722;color:#c084fc">PEDIDO</span>':esc(l.cod))+'</td>'+
-        '<td>'+esc(l.emp)+'</td><td>'+esc(l.region)+'</td><td>'+esc(l.comuna)+'</td>'+
-        '<td title="'+esc(l.name)+'">'+esc(l.name)+'</td>'+
+      const lp=l.linea?'<span class="pill" style="background:'+(l.linea==="Prevención"?"#3b82f622;color:#60a5fa":"#f59e0b22;color:#fbbf24")+'">'+esc(l.linea)+'</span>':'—';
+      h+='<tr><td class="code" title="'+esc(l.cod)+'">'+(l.manual?'<span class="pill" style="background:#a855f722;color:#c084fc">PEDIDO</span>':esc(l.cod))+'</td>'+
+        '<td>'+esc(l.emp)+'</td>'+
+        '<td title="'+esc(l.gen)+'">'+esc(l.gen)+'</td>'+
+        '<td>'+lp+'</td>'+
+        '<td title="'+esc(l.region)+'">'+esc(l.region)+'</td>'+
+        '<td title="'+esc(l.comuna)+'">'+esc(l.comuna)+'</td>'+
         '<td class="num">'+miles(l.cant)+'</td><td class="num">'+miles(l.ent)+'</td>'+
         '<td class="num" style="color:'+(l.pend>0?"#d97706":"#16a34a")+';font-weight:'+(l.pend>0?"bold":"normal")+'">'+miles(l.pend)+'</td>'+
         '<td class="num" style="color:'+(l.pendFact>0?"#3b82f6":"#16a34a")+'">'+miles(l.pendFact)+'</td>'+
-        '<td><span style="color:'+(INTCOLOR[l.est]||"#e8eef4")+'">'+esc(l.est)+'</span></td></tr>';
+        '<td title="'+esc(l.est)+'"><span style="color:'+(INTCOLOR[l.est]||"#e8eef4")+'">'+esc(l.est)+'</span></td></tr>';
     });
-    h+='<tr style="border-top:2px solid #2a3a4d;font-weight:bold"><td colspan="5">TOTAL</td><td class="num">'+miles(tCant)+'</td><td class="num">'+miles(tEnt)+'</td><td class="num" style="color:#d97706">'+miles(tPend)+'</td><td class="num" style="color:#3b82f6">'+miles(tPF)+'</td><td></td></tr>';
+    h+='<tr class="totrow"><td colspan="6">TOTAL</td><td class="num">'+miles(tCant)+'</td><td class="num">'+miles(tEnt)+'</td><td class="num" style="color:#d97706">'+miles(tPend)+'</td><td class="num" style="color:#3b82f6">'+miles(tPF)+'</td><td></td></tr>';
     h+='</tbody></table></div>';
     out.innerHTML=h;
   }
   window.cProdRender=renderProd;
   (function(){
     const t=$("prodtoggle");if(!t)return;
-    t.addEventListener("click",()=>{const b=$("prodbody");const open=b.style.display==="none";b.style.display=open?"block":"none";t.textContent=t.textContent.replace(/[▸▾]\s*$/,"")+(open?"▾":"▸");if(open){buildProdList();renderProd();}});
-    ["prodq","prodest","prodemp"].forEach(id=>{const el=$(id);if(el){el.addEventListener("input",renderProd);el.addEventListener("change",renderProd);}});
-    const pc=$("prodclear");if(pc)pc.addEventListener("click",()=>{$("prodq").value="";$("prodest").value="ALL";$("prodemp").value="ALL";renderProd();});
+    t.addEventListener("click",()=>{const b=$("prodbody");const open=b.style.display==="none";b.style.display=open?"block":"none";const ar=$("prodarrow");if(ar)ar.textContent=open?"▾":"▸";if(open){buildProdList();renderProd();}});
+    const pc=$("prodclear");if(pc)pc.addEventListener("click",()=>{["pprod","plin","pest"].forEach(k=>{FILT[k].clear();msBtnRefresh(k);const pop=document.getElementById("c_pop_"+k);if(pop)pop.querySelectorAll("input[type=checkbox]").forEach(cb=>cb.checked=false);});saveFILT();renderKPIs();renderTable();renderProd();});
   })();
   window.cNota=(c,v)=>{setCtrl(c,"notas",v);};
   window.cFleteC=(c,v)=>{setCtrl(c,"fleteCant",normNum(v));renderKPIs();renderTable();};
@@ -811,7 +921,7 @@ initGrid(document.querySelector("#view-control table.grid"),"grid_control_v3");
       const counter={};for(let k=1;k<dr.length;k++){const code=dr[k][jc];if(!code)continue;if(jo>=0&&String(dr[k][jo]).indexOf("Pedido")>=0)continue;if(String(code).indexOf("FEMER")===0)continue;counter[code]=(counter[code]||0);const idx=counter[code];counter[code]++;const key=code+"#"+idx;const cur=ICOST[key]||{costo:"",prov:"",int:"Pendiente",guia:"",fact:""};if(jco>=0&&dr[k][jco]!==""&&dr[k][jco]!=null)cur.costo=String(dr[k][jco]);if(jpr>=0&&dr[k][jpr]!=null)cur.prov=String(dr[k][jpr]);if(jin>=0&&dr[k][jin])cur.int=String(dr[k][jin]);if(jg>=0&&dr[k][jg]!=null)cur.guia=String(dr[k][jg]);if(jf>=0&&dr[k][jf]!=null)cur.fact=String(dr[k][jf]);ICOST[key]=cur;}}
     saveCtrl();saveIC();renderKPIs();renderTable();buildFilters();$("progress").innerHTML="✔ Restaurados datos internos de "+n+" OC desde el Excel.";e.target.value="";});
   $("clear").addEventListener("click",()=>{if(!confirm("Borra la caché de OC (NO borra tus costos, estados ni notas). ¿Continuar?"))return;DET={};OCS=[];DAYL={};try{localStorage.removeItem(CACHEKEY);}catch(e){}renderKPIs();renderTable();buildFilters();$("progress").innerHTML="Caché borrada. Presiona «Actualizar».";});
-  $("limpiar").addEventListener("click",()=>{$("q").value="";Object.keys(FILT).forEach(k=>FILT[k].clear());Object.keys(FILT).forEach(renderMS);renderKPIs();renderTable();});
+  $("limpiar").addEventListener("click",()=>{$("q").value="";Object.keys(FILT).forEach(k=>FILT[k].clear());Object.keys(FILT).forEach(renderMS);saveFILT();renderKPIs();renderTable();renderProd();});
   $("selall").addEventListener("change",function(){cSelAll(this.checked);});
   $("bulkapply").addEventListener("click",cBulkApply);
   $("bulkclear").addEventListener("click",cBulkClear);
@@ -820,7 +930,130 @@ initGrid(document.querySelector("#view-control table.grid"),"grid_control_v3");
   ["from","to"].forEach(id=>$(id).addEventListener("change",()=>{$("quick").value="custom";}));
   $("q").addEventListener("input",()=>{renderKPIs();renderTable();});
   document.querySelectorAll("#view-control table.grid th[data-k]").forEach(th=>th.addEventListener("click",()=>{const k=th.getAttribute("data-k");if(sortK===k)sortDir*=-1;else{sortK=k;sortDir=1;}renderTable();}));
+  /* ============== Acceso compartido + registro de auditoría (Firebase) ============== */
+  var FB=null,fbUser=null,fbRole=null,fbUnsub=[],fbApplying=false,fbAccess={editors:[],viewers:[]};
+  var ADMIN=(window.FB_ADMIN||"").toLowerCase();
+  function fbReady(){return FB&&FB.db;}
+  function fbCanEdit(){return fbRole==="admin"||fbRole==="editor";}
+  function fbInit(){
+    try{
+      if(!window.firebase||!window.FBCONFIG){renderAuthBar();return;}
+      firebase.initializeApp(window.FBCONFIG);
+      FB={auth:firebase.auth(),db:firebase.firestore(),FieldValue:firebase.firestore.FieldValue};
+      firebase.auth().onAuthStateChanged(function(u){
+        if(u){fbUser={uid:u.uid,email:(u.email||"").toLowerCase(),name:u.displayName||u.email||"—"};fbResolveRole();}
+        else{fbUser=null;fbRole=null;fbTeardown();document.body.classList.remove("ro");renderAuthBar();}
+      });
+      firebase.auth().getRedirectResult().catch(function(){});
+    }catch(e){console.warn("Firebase init",e);}
+    renderAuthBar();
+  }
+  window.fbLogin=function(){
+    if(!fbReady()){alert("El acceso compartido no está disponible ahora (no cargó Firebase). Revisa tu conexión e inténtalo de nuevo.");return;}
+    var prov=new firebase.auth.GoogleAuthProvider();
+    firebase.auth().signInWithPopup(prov).catch(function(err){
+      if(err&&/popup/.test(err.code||"")){firebase.auth().signInWithRedirect(prov);}
+      else{alert("No se pudo iniciar sesión: "+(err&&err.message||err));}
+    });
+  };
+  window.fbLogout=function(){if(fbReady())firebase.auth().signOut();};
+  function fbResolveRole(){
+    if(!fbUser)return;
+    if(fbUser.email===ADMIN){fbRole="admin";fbAfterRole();return;}
+    FB.db.doc("config/access").get().then(function(s){
+      var d=s.exists?s.data():{};
+      var eds=(d.editors||[]).map(function(x){return String(x).toLowerCase();});
+      var vs=(d.viewers||[]).map(function(x){return String(x).toLowerCase();});
+      fbAccess={editors:eds,viewers:vs};
+      fbRole=eds.indexOf(fbUser.email)>=0?"editor":vs.indexOf(fbUser.email)>=0?"viewer":"none";
+      fbAfterRole();
+    }).catch(function(){fbRole="none";fbAfterRole();});
+  }
+  function fbAfterRole(){
+    renderAuthBar();
+    if(fbRole==="none"){document.body.classList.add("ro");$("progress").innerHTML='<b style="color:#d97706">Tu cuenta ('+esc(fbUser.email)+') aún no tiene acceso. Pídele al administrador que te agregue en «Administrar accesos».</b>';return;}
+    document.body.classList.toggle("ro",!fbCanEdit());
+    fbSubscribe();
+  }
+  function fbTeardown(){fbUnsub.forEach(function(u){try{u();}catch(e){}});fbUnsub=[];}
+  function fbClean(o){var r={};Object.keys(o||{}).forEach(function(k){var v=o[k];r[k]=(v&&typeof v.toDate==="function")?v.toDate().toISOString():v;});return r;}
+  function fbSubscribe(){
+    if(!fbReady()||fbUnsub.length)return;
+    fbApplying=true;
+    fbUnsub.push(FB.db.collection("control").onSnapshot(function(s){s.forEach(function(d){CTRL[d.id]=fbClean(d.data());});try{localStorage.setItem(LSKEY,JSON.stringify(CTRL));}catch(e){}fbAfterData();},fbErr));
+    fbUnsub.push(FB.db.collection("itemcost").onSnapshot(function(s){s.forEach(function(d){ICOST[d.id]=fbClean(d.data());});try{localStorage.setItem(ICKEY,JSON.stringify(ICOST));}catch(e){}fbAfterData();},fbErr));
+    fbUnsub.push(FB.db.collection("pedidos").onSnapshot(function(s){s.forEach(function(d){PEDIDOS[d.id]=fbClean(d.data());});try{localStorage.setItem(PEDKEY,JSON.stringify(PEDIDOS));}catch(e){}fbAfterData();},fbErr));
+  }
+  function fbErr(e){console.warn("fb snapshot",e);}
+  function fbAfterData(){fbApplying=false;renderKPIs();renderTable();renderProd();buildFilters();}
+  function fbEdit(coll,id,field,oldv,newv){
+    if(fbApplying||!fbReady()||!fbCanEdit())return;
+    try{
+      var doc={};doc[field]=newv;doc._by=fbUser.name;doc._byEmail=fbUser.email;doc._at=FB.FieldValue.serverTimestamp();
+      FB.db.collection(coll).doc(id).set(doc,{merge:true});
+      FB.db.collection("audit").add({at:FB.FieldValue.serverTimestamp(),byUid:fbUser.uid,byName:fbUser.name,byEmail:fbUser.email,coll:coll,id:id,field:field,old:(oldv==null?"":String(oldv)),val:(newv==null?"":String(newv))});
+    }catch(e){console.warn("fbEdit",e);}
+  }
+  function fbSyncPedidos(){
+    if(fbApplying||!fbReady()||!fbCanEdit())return;
+    try{Object.keys(PEDIDOS).forEach(function(id){var doc=JSON.parse(JSON.stringify(PEDIDOS[id]||{}));doc._by=fbUser.name;doc._byEmail=fbUser.email;doc._at=FB.FieldValue.serverTimestamp();FB.db.collection("pedidos").doc(id).set(doc,{merge:true});});}catch(e){console.warn("fbSyncPed",e);}
+  }
+  function renderAuthBar(){
+    var el=$("authbar");if(!el)return;
+    if(!window.firebase||!window.FBCONFIG){el.innerHTML='<span style="color:#8aa0b4">Acceso compartido no disponible</span>';return;}
+    if(!fbUser){el.innerHTML='<button class="authbtn" onclick="fbLogin()">Entrar con Google</button>';return;}
+    var rt={admin:"Administrador",editor:"Editor",viewer:"Solo lectura",none:"Sin acceso"}[fbRole]||"…";
+    var h='<span class="authpill" title="'+esc(fbUser.email)+'">👤 '+esc(fbUser.name)+' · '+rt+'</span>';
+    if(fbRole&&fbRole!=="none")h+=' <a class="authlink" onclick="fbOpenAudit()">Historial</a>';
+    if(fbRole==="admin")h+=' <a class="authlink" onclick="fbOpenAdmin()">Administrar accesos</a>';
+    if(fbCanEdit())h+=' <a class="authlink" onclick="fbMigrate()" title="Subir a la nube compartida lo que tengas guardado en este navegador">Subir mis datos</a>';
+    h+=' <a class="authlink" onclick="fbLogout()">Salir</a>';
+    el.innerHTML=h;
+  }
+  window.fbOpenAdmin=function(){
+    if(fbRole!=="admin")return;
+    var eds=(fbAccess.editors||[]);if(!eds.length&&window.FB_DEFAULT_EDITORS)eds=window.FB_DEFAULT_EDITORS.slice();
+    $("ed_editors").value=eds.join("\n");$("ed_viewers").value=(fbAccess.viewers||[]).join("\n");$("admin_msg").textContent="";
+    $("adminmodal").style.display="flex";
+  };
+  function fbSaveAdmin(){
+    var parse=function(t){return t.split(/[\n,; ]+/).map(function(x){return x.trim().toLowerCase();}).filter(Boolean);};
+    var eds=parse($("ed_editors").value),vs=parse($("ed_viewers").value);
+    $("admin_msg").textContent="Guardando…";
+    FB.db.doc("config/access").set({editors:eds,viewers:vs,_by:fbUser.email,_at:FB.FieldValue.serverTimestamp()}).then(function(){
+      fbAccess={editors:eds,viewers:vs};$("admin_msg").textContent="Guardado ✔ (los cambios aplican cuando cada persona vuelve a entrar)";
+    }).catch(function(e){$("admin_msg").textContent="Error: "+(e&&e.message||e);});
+  }
+  window.fbMigrate=function(){
+    if(!fbCanEdit())return;
+    if(!confirm("Se subirán a la nube compartida los datos guardados en ESTE navegador (costos, estados, notas, guías, facturas, pedidos), combinándolos con lo que ya haya. ¿Continuar?"))return;
+    try{var n=0;
+      Object.keys(CTRL).forEach(function(c){var d=Object.assign({},CTRL[c]);delete d._at;d._by=fbUser.name;d._byEmail=fbUser.email;d._at=FB.FieldValue.serverTimestamp();FB.db.collection("control").doc(c).set(d,{merge:true});n++;});
+      Object.keys(ICOST).forEach(function(k){var d=Object.assign({},ICOST[k]);delete d._at;d._by=fbUser.name;d._byEmail=fbUser.email;d._at=FB.FieldValue.serverTimestamp();FB.db.collection("itemcost").doc(k).set(d,{merge:true});n++;});
+      Object.keys(PEDIDOS).forEach(function(id){var d=Object.assign({},PEDIDOS[id]);delete d._at;d._by=fbUser.name;d._byEmail=fbUser.email;d._at=FB.FieldValue.serverTimestamp();FB.db.collection("pedidos").doc(id).set(d,{merge:true});});
+      alert("Listo: se subieron "+n+" registros a la nube compartida.");
+    }catch(e){alert("Error subiendo datos: "+(e&&e.message||e));}
+  };
+  var FLABEL={interno:"Estado interno",notas:"Notas",guias:"Guía(s)",facturas:"Factura(s)",fleteCant:"Flete (cant.)",fleteCosto:"Flete (costo)",costo:"Costo unit.",prov:"Proveedor",int:"Estado interno (línea)",guia:"Guía (línea)",fact:"Factura (línea)",entregado:"Unid. entregadas"};
+  function fbFieldLabel(f){return FLABEL[f]||f;}
+  function fbNiceId(coll,id){if(coll==="itemcost"){var p=String(id).split("#");return "OC "+p[0]+" · línea "+(parseInt(p[1]||0,10)+1);}if(coll==="pedidos")return "Pedido "+id;return "OC "+id;}
+  function fbFmtDate(d){function p(n){return String(n).padStart(2,"0");}return p(d.getDate())+"-"+p(d.getMonth()+1)+"-"+d.getFullYear()+" "+p(d.getHours())+":"+p(d.getMinutes());}
+  window.fbOpenAudit=function(){
+    if(!fbReady())return;
+    $("audit_sub").textContent="Últimos 150 cambios (quién, qué y cuándo)";$("audit_body").innerHTML="Cargando…";$("auditmodal").style.display="flex";
+    FB.db.collection("audit").orderBy("at","desc").limit(150).get().then(function(snap){
+      var rows=[];snap.forEach(function(d){var a=d.data();var w=(a.at&&a.at.toDate)?a.at.toDate():null;
+        rows.push('<div class="audit-row"><span class="who">'+esc(a.byName||a.byEmail||"—")+'</span> · <b>'+esc(fbFieldLabel(a.field))+'</b> en '+esc(fbNiceId(a.coll,a.id))+': «'+esc(a.old||"—")+'» → «'+esc(a.val||"—")+'» <span class="when">'+(w?fbFmtDate(w):"")+'</span></div>');});
+      $("audit_body").innerHTML=rows.join("")||"Sin cambios registrados aún.";
+    }).catch(function(e){$("audit_body").innerHTML="No se pudo cargar el historial: "+(e&&e.message||e);});
+  };
+  $("admin_save").addEventListener("click",fbSaveAdmin);
+  $("admin_close").addEventListener("click",function(){$("adminmodal").style.display="none";});
+  $("audit_close").addEventListener("click",function(){$("auditmodal").style.display="none";});
+  [$("adminmodal"),$("auditmodal")].forEach(function(m){if(m)m.addEventListener("click",function(e){if(e.target===m)m.style.display="none";});});
+
   (function init(){setQuickDates();loadCatalogo();loadFacturas();loadServerData();const cache=loadCache();if(cache.det)DET=cache.det;if(cache.dayLists)DAYL=cache.dayLists;let lup="";try{lup=localStorage.getItem(LUPKEY)||"";}catch(e){}if(!lup&&cache.savedAt)lup=cache.savedAt;showLastUpd(lup);const hayPed=Object.keys(PEDIDOS).filter(id=>!PEDIDOS[id].linked).length;if(cache.ocs&&cache.ocs.length){OCS=cache.ocs;if(cache.from)$("from").value=cache.from;if(cache.to)$("to").value=cache.to;$("xlsx").disabled=false;$("progress").innerHTML="Mostrando "+OCS.length+" OC guardadas. Presiona «Actualizar» para traer nuevas y cambios.";}else{$("progress").innerHTML=(hayPed?hayPed+" pedido(s) manual(es) guardado(s). ":"")+"Elige un rango y presiona «Actualizar». Lo descargado queda guardado; tus costos y estados quedan aparte y no se borran.";}renderKPIs();renderTable();buildFilters();})();
+  fbInit();  // arranca el acceso compartido / auditoría (si Firebase cargó)
 })();
 
 /* ===================== MÓDULO 2: ANÁLISIS DE COMPETENCIA ===================== */

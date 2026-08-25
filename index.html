@@ -729,7 +729,7 @@ initGrid(document.querySelector("#view-control table.grid"),"grid_control_v3");
     }
     const d=r.d;if(!d)return'<div class="dbox muted">Detalle aún no cargado.</div>';const lug=parseLugar(r.nombre,d);
     const vinc=Object.keys(PEDIDOS).some(id=>PEDIDOS[id].linked&&PEDIDOS[id].linkedCode===r.codigo);
-    let g='<div class="dbox"><div class="dhead"><span class="code">'+esc(r.codigo)+'</span><span class="sep">•</span>'+esc(r.empresa)+'<span class="sep">•</span><span class="pill" style="background:'+r.estadoColor+'22;color:'+r.estadoColor+'">'+esc(r.estadoTxt)+'</span>'+(vinc?'<span class="sep">•</span><span class="pill" style="background:#a855f722;color:#c084fc" title="Vinculada desde un pedido manual">↩ desde pedido</span>':'')+'</div>'+
+    let g='<div class="dbox"><div class="dhead"><span class="code">'+esc(r.codigo)+'</span><span class="sep">•</span>'+esc(r.empresa)+'<span class="sep">•</span><span class="pill" style="background:'+r.estadoColor+'22;color:'+r.estadoColor+'">'+esc(r.estadoTxt)+'</span>'+(vinc?'<span class="sep">•</span><span class="pill" style="background:#a855f722;color:#c084fc" title="Vinculada desde un pedido manual">↩ desde pedido</span>':'')+fbOcHistBtn(r.codigo)+fbEditedTag("control",r.codigo)+'</div>'+
       '<div class="dgrid">'+kv("Comprador",d.organismo)+kv("FEMER",femerOf(d))+kv("Unidad",d.unidad)+kv("Lugar de entrega",[lug.comuna,lug.region].filter(Boolean).join(", "))+kv("Contacto",[d.cContacto,d.cMail,d.cFono].filter(Boolean).join(" · "))+kv("F. envío",fmtDate(d.fEnvio))+kv("F. aceptación",fmtDate(d.fAcept))+'</div>';
     g+=itemsTable(r.codigo,d.items||[],false);
     g+=footerHTML(r.codigo,ct,cc);
@@ -991,7 +991,8 @@ initGrid(document.querySelector("#view-control table.grid"),"grid_control_v3");
     try{
       var doc={};doc[field]=newv;doc._by=fbUser.name;doc._byEmail=fbUser.email;doc._at=FB.FieldValue.serverTimestamp();
       FB.db.collection(coll).doc(id).set(doc,{merge:true});
-      FB.db.collection("audit").add({at:FB.FieldValue.serverTimestamp(),byUid:fbUser.uid,byName:fbUser.name,byEmail:fbUser.email,coll:coll,id:id,field:field,old:(oldv==null?"":String(oldv)),val:(newv==null?"":String(newv))});
+      var ocCode=(coll==="itemcost")?String(id).split("#")[0]:id;
+      FB.db.collection("audit").add({at:FB.FieldValue.serverTimestamp(),byUid:fbUser.uid,byName:fbUser.name,byEmail:fbUser.email,coll:coll,id:id,oc:ocCode,field:field,old:(oldv==null?"":String(oldv)),val:(newv==null?"":String(newv))});
     }catch(e){console.warn("fbEdit",e);}
   }
   function fbSyncPedidos(){
@@ -1038,15 +1039,22 @@ initGrid(document.querySelector("#view-control table.grid"),"grid_control_v3");
   function fbFieldLabel(f){return FLABEL[f]||f;}
   function fbNiceId(coll,id){if(coll==="itemcost"){var p=String(id).split("#");return "OC "+p[0]+" · línea "+(parseInt(p[1]||0,10)+1);}if(coll==="pedidos")return "Pedido "+id;return "OC "+id;}
   function fbFmtDate(d){function p(n){return String(n).padStart(2,"0");}return p(d.getDate())+"-"+p(d.getMonth()+1)+"-"+d.getFullYear()+" "+p(d.getHours())+":"+p(d.getMinutes());}
-  window.fbOpenAudit=function(){
-    if(!fbReady())return;
-    $("audit_sub").textContent="Últimos 150 cambios (quién, qué y cuándo)";$("audit_body").innerHTML="Cargando…";$("auditmodal").style.display="flex";
-    FB.db.collection("audit").orderBy("at","desc").limit(150).get().then(function(snap){
-      var rows=[];snap.forEach(function(d){var a=d.data();var w=(a.at&&a.at.toDate)?a.at.toDate():null;
-        rows.push('<div class="audit-row"><span class="who">'+esc(a.byName||a.byEmail||"—")+'</span> · <b>'+esc(fbFieldLabel(a.field))+'</b> en '+esc(fbNiceId(a.coll,a.id))+': «'+esc(a.old||"—")+'» → «'+esc(a.val||"—")+'» <span class="when">'+(w?fbFmtDate(w):"")+'</span></div>');});
-      $("audit_body").innerHTML=rows.join("")||"Sin cambios registrados aún.";
+  window.fbOpenAudit=function(code){
+    if(!fbReady()){alert("Inicia sesión con Google para ver el historial de cambios.");return;}
+    $("audit_sub").textContent=code?("Cambios de la OC "+code+" (quién, qué y cuándo)"):"Últimos 150 cambios (quién, qué y cuándo)";
+    $("audit_body").innerHTML="Cargando…";$("auditmodal").style.display="flex";
+    var q=code?FB.db.collection("audit").where("oc","==",code).limit(300):FB.db.collection("audit").orderBy("at","desc").limit(150);
+    q.get().then(function(snap){
+      var arr=[];snap.forEach(function(d){arr.push(d.data());});
+      arr.sort(function(a,b){var ta=(a.at&&a.at.toMillis)?a.at.toMillis():0,tb=(b.at&&b.at.toMillis)?b.at.toMillis():0;return tb-ta;});
+      var rows=arr.map(function(a){var w=(a.at&&a.at.toDate)?a.at.toDate():null;
+        return '<div class="audit-row"><span class="who">'+esc(a.byName||a.byEmail||"—")+'</span> · <b>'+esc(fbFieldLabel(a.field))+'</b> en '+esc(fbNiceId(a.coll,a.id))+': «'+esc(a.old||"—")+'» → «'+esc(a.val||"—")+'» <span class="when">'+(w?fbFmtDate(w):"")+'</span></div>';});
+      $("audit_body").innerHTML=rows.join("")||"Sin cambios registrados"+(code?" para esta OC.":" aún.");
     }).catch(function(e){$("audit_body").innerHTML="No se pudo cargar el historial: "+(e&&e.message||e);});
   };
+  function fbOcHistBtn(code){if(!fbReady())return "";return '<span class="sep">•</span><a class="authlink" style="font-size:12px" onclick="fbOpenAudit(\''+esc(code)+'\')">🕑 Historial de esta OC</a>';}
+  function fbEditedTag(coll,id){var o=(coll==="control")?CTRL[id]:ICOST[id];if(!o||!o._by)return "";var w=o._at?(" · "+fbShort(o._at)):"";return '<span class="edited-tag">✎ última edición: '+esc(o._by)+esc(w)+'</span>';}
+  function fbShort(iso){try{var d=new Date(iso);function p(n){return String(n).padStart(2,"0");}return p(d.getDate())+"-"+p(d.getMonth()+1)+" "+p(d.getHours())+":"+p(d.getMinutes());}catch(e){return "";}}
   $("admin_save").addEventListener("click",fbSaveAdmin);
   $("admin_close").addEventListener("click",function(){$("adminmodal").style.display="none";});
   $("audit_close").addEventListener("click",function(){$("auditmodal").style.display="none";});
